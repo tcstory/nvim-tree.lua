@@ -159,9 +159,6 @@ function M.find_file(with_open)
   if with_open then
     M.open()
     view.focus()
-    if not is_file_readable(filepath) then return end
-    lib.set_index_and_redraw(filepath)
-    return
   end
 
   if not is_file_readable(filepath) then return end

@@ -28,9 +28,6 @@ function M.init(with_open, with_reload)
   if not M.Tree.cwd then
     M.Tree.cwd = luv.cwd()
   end
-  if config.use_git() then
-    git.git_root(M.Tree.cwd)
-  end
   populate(M.Tree.entries, M.Tree.cwd)
 
   local stat = luv.fs_stat(M.Tree.cwd)
@@ -132,9 +129,6 @@ function M.unroll_dir(node)
   if #node.entries > 0 then
     renderer.draw(M.Tree, true)
   else
-    if config.use_git() then
-      git.git_root(node.absolute_path)
-    end
     populate(node.entries, node.link_to or node.absolute_path, node)
 
     renderer.draw(M.Tree, true)
@@ -145,14 +139,16 @@ function M.unroll_dir(node)
   end
 end
 
-local function refresh_git(node)
+local function refresh_git(node, callback)
   if not node then node = M.Tree end
-  git.update_status(node.entries, node.absolute_path or node.cwd, node, false)
-  for _, entry in pairs(node.entries) do
-    if entry.entries and #entry.entries > 0 then
-      refresh_git(entry)
+  git.update_status(node.entries, node.absolute_path or node.cwd, node, false, function()
+    for _, entry in pairs(node.entries) do
+      if entry.entries and #entry.entries > 0 then
+        refresh_git(entry, callback)
+        callback()
+      end
     end
-  end
+  end)
 end
 
 -- TODO update only entries where directory has changed
@@ -177,11 +173,8 @@ function M.refresh_tree()
 
   local use_git = config.use_git()
   if use_git then
-    vim.schedule(function()
-      git.reload_roots()
-      refresh_git(M.Tree)
-      M.redraw()
-    end)
+    git.reload_roots()
+    refresh_git(M.Tree, M.redraw)
   end
 
   if vim.g.nvim_tree_lsp_diagnostics == 1 then
@@ -189,7 +182,7 @@ function M.refresh_tree()
   end
 
   if view.win_open() then
-    renderer.draw(M.Tree, true)
+    M.redraw()
   else
     M.Tree.loaded = false
   end
