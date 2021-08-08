@@ -28,10 +28,8 @@ function M.init(with_open, with_reload)
   if not M.Tree.cwd then
     M.Tree.cwd = luv.cwd()
   end
-  if config.use_git() then
-    git.git_root(M.Tree.cwd)
-  end
   populate(M.Tree.entries, M.Tree.cwd)
+  git.analyze_cwd(M.Tree.cwd)
 
   local stat = luv.fs_stat(M.Tree.cwd)
   M.Tree.last_modified = stat.mtime.sec
@@ -43,7 +41,7 @@ function M.init(with_open, with_reload)
   end
 
   if with_reload then
-    renderer.draw(M.Tree, true)
+    renderer.draw(true)
     M.Tree.loaded = true
   end
 
@@ -54,7 +52,7 @@ function M.init(with_open, with_reload)
 end
 
 function M.redraw()
-  renderer.draw(M.Tree, true)
+  renderer.draw(true)
 end
 
 local function get_node_at_line(line)
@@ -130,28 +128,16 @@ function M.unroll_dir(node)
   node.open = not node.open
   if node.has_children then node.has_children = false end
   if #node.entries > 0 then
-    renderer.draw(M.Tree, true)
+    renderer.draw(true)
   else
-    if config.use_git() then
-      git.git_root(node.absolute_path)
-    end
     populate(node.entries, node.link_to or node.absolute_path, node)
+    git.analyze_cwd(node.link_to or node.absolute_path)
 
-    renderer.draw(M.Tree, true)
+    renderer.draw(true)
   end
 
   if vim.g.nvim_tree_lsp_diagnostics == 1 then
     diagnostics.update()
-  end
-end
-
-local function refresh_git(node)
-  if not node then node = M.Tree end
-  git.update_status(node.entries, node.absolute_path or node.cwd, node, false)
-  for _, entry in pairs(node.entries) do
-    if entry.entries and #entry.entries > 0 then
-      refresh_git(entry)
-    end
   end
 end
 
@@ -174,22 +160,14 @@ function M.refresh_tree()
   refreshing = true
 
   refresh_nodes(M.Tree)
-
-  local use_git = config.use_git()
-  if use_git then
-    vim.schedule(function()
-      git.reload_roots()
-      refresh_git(M.Tree)
-      M.redraw()
-    end)
-  end
+  git.reload()
 
   if vim.g.nvim_tree_lsp_diagnostics == 1 then
     vim.schedule(diagnostics.update)
   end
 
   if view.win_open() then
-    renderer.draw(M.Tree, true)
+    M.redraw()
   else
     M.Tree.loaded = false
   end
@@ -217,6 +195,7 @@ function M.set_index_and_redraw(fname)
         if #entry.entries == 0 then
           reload = true
           populate(entry.entries, entry.absolute_path, entry)
+          git.analyze_cwd(entry.absolute_path)
         end
         if entry.open == false then
           reload = true
@@ -236,7 +215,7 @@ function M.set_index_and_redraw(fname)
     M.Tree.loaded = false
     return
   end
-  renderer.draw(M.Tree, reload)
+  renderer.draw(reload)
   if index then
     view.set_cursor({index, 0})
   end
@@ -399,7 +378,7 @@ function M.open_file(mode, filename)
     view.close()
   end
 
-  renderer.draw(M.Tree, true)
+  renderer.draw(true)
 end
 
 function M.open_file_in_tab(filename)
@@ -471,7 +450,7 @@ function M.open()
   if M.Tree.loaded or (respect_buf_cwd == 1 and cwd ~= M.Tree.cwd) then
     M.change_dir(cwd)
   end
-  renderer.draw(M.Tree, not M.Tree.loaded)
+  renderer.draw(not M.Tree.loaded)
   M.Tree.loaded = true
 end
 
@@ -513,7 +492,7 @@ function M.sibling(node, direction)
 
   line, _ = get_line_from_node(target_node)(M.Tree.entries, true)
   view.set_cursor({line, 0})
-  renderer.draw(M.Tree, true)
+  renderer.draw(true)
 end
 
 function M.close_node(node)
@@ -536,7 +515,7 @@ function M.parent_node(node, should_close)
     end
     api.nvim_win_set_cursor(view.get_winnr(), {line, 0})
   end
-  renderer.draw(M.Tree, true)
+  renderer.draw(true)
 end
 
 function M.toggle_ignored()
@@ -562,6 +541,39 @@ function M.dir_up(node)
     M.change_dir(newdir)
     return M.set_index_and_redraw(node.absolute_path)
   end
+end
+
+-- REFACTO AFTER THIS COMMENT
+--
+--
+
+local Tree
+
+function M.get_node_at_cursor()
+  local idx = vim.api.nvim_win_get_cursor(view.get_winnr())[1]
+  return Tree:get_current_node(idx - 1)
+end
+
+function M.unroll_dir(node)
+  if Tree:collapse(node) then
+    -- git.analyze_cwd(node.link_to or node.absolute_path)
+  end
+  renderer.draw(Tree, true)
+  -- if vim.g.nvim_tree_lsp_diagnostics == 1 then
+  --   diagnostics.update()
+  -- end
+end
+
+function M.setup(open)
+  Tree = require'nvim-tree.tree'.Tree:new(open)
+  git.analyze_cwd(Tree.cwd)
+
+  if open then
+    M.open()
+    renderer.draw(Tree, true)
+  end
+
+  events._dispatch_ready()
 end
 
 return M

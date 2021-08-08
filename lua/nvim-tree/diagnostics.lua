@@ -1,8 +1,7 @@
 local a = vim.api
 local utils = require'nvim-tree.utils'
 local view = require'nvim-tree.view'
-local config = require'nvim-tree.config'
-local icon_state = config.get_icon_state()
+local icon_state = require'nvim-tree.config'.get_icon_state()
 local get_diagnostics = vim.lsp.diagnostic.get_all
 
 local M = {}

@@ -86,7 +86,7 @@ local keypress_funcs = {
   dir_up = lib.dir_up,
   close = function() M.close() end,
   preview = function(node)
-    if node.entries ~= nil or node.name == '..' then return end
+    if node.children ~= nil or node.name == '..' then return end
     return lib.open_file('preview', node.absolute_path)
   end,
   system_open = function(node)
@@ -132,15 +132,15 @@ function M.on_keypress(mode)
 
   if node.name == ".." then
     return lib.change_dir("..")
-  elseif mode == "cd" and node.entries ~= nil then
+  elseif mode == "cd" and node.children ~= nil then
     return lib.change_dir(lib.get_last_group_node(node).absolute_path)
   elseif mode == "cd" then
     return
   end
 
-  if node.link_to and not node.entries then
+  if node.link_to and not node.children then
     lib.open_file(mode, node.link_to)
-  elseif node.entries ~= nil then
+  elseif node.children ~= nil then
     lib.unroll_dir(node)
   else
     lib.open_file(mode, node.absolute_path)
@@ -189,9 +189,6 @@ function M.find_file(with_open)
   if with_open then
     M.open()
     view.focus()
-    if not is_file_readable(filepath) then return end
-    lib.set_index_and_redraw(filepath)
-    return
   end
 
   if not is_file_readable(filepath) then return end
@@ -269,8 +266,88 @@ function M.place_cursor_on_node()
   api.nvim_win_set_cursor(0, {cursor[1], idx})
 end
 
-view.setup()
-colors.setup()
-vim.defer_fn(M.on_enter, 1)
+-- TODO: above this needs some refactoring, lib should expose routing, and implementations should go in separate files
+
+local function manage_netrw(disable_netrw, hijack_netrw)
+  if disable_netrw then
+    vim.g.loaded_netrw = 1
+    vim.g.loaded_netrwPlugin = 1
+  elseif hijack_netrw then
+    vim.cmd "silent! autocmd! FileExplorer *"
+  end
+end
+
+local function setup_vim_commands()
+  vim.cmd [[
+    command! NvimTreeOpen lua require'nvim-tree'.open()
+    command! NvimTreeClose lua require'nvim-tree'.close()
+    command! NvimTreeToggle lua require'nvim-tree'.toggle()
+    command! NvimTreeRefresh lua require'nvim-tree'.refresh()
+    command! NvimTreeClipboard lua require'nvim-tree'.print_clipboard()
+    command! NvimTreeFindFile lua require'nvim-tree'.find_file(true)
+    command! -nargs=1 NvimTreeResize lua require'nvim-tree'.resize(<args>)
+  ]]
+end
+
+local function setup_autocommands(opts)
+  vim.cmd "augroup NvimTree"
+  vim.cmd [[
+    """ refreshes the tree on write
+    au BufWritePost * lua require'nvim-tree'.refresh()"
+
+    """ find file in the tree when entering a buffer
+    au BufEnter * lua require'nvim-tree'.buf_enter()
+
+    """ reset highlights when colorscheme is changed
+    au ColorScheme * lua require'nvim-tree'.reset_highlight()
+
+    """ reload all git statuses when fugitive or neogit sends a status update
+    au User FugitiveChanged,NeogitStatusRefreshed lua require'nvim-tree.git'.reload()
+
+    """ deletes the existing buffer when saved in a session to avoid conflicts
+    au SessionLoadPost * lua require'nvim-tree.view'._wipe_rogue_buffer()
+  ]]
+
+  if opts.lsp_diagnostics then
+    vim.cmd "au User LspDiagnosticsChanged lua require'nvim-tree.diagnostics'.update()"
+  end
+  if opts.auto_close then
+    vim.cmd "au WinClosed * lua require'nvim-tree'.on_leave()"
+  end
+  if opts.tab_open then
+    vim.cmd "au TabEnter * lua require'nvim-tree'.tab_change()"
+  end
+  if opts.hijack_cursor then
+    vim.cmd "au CursorMoved NvimTree lua require'nvim-tree'.place_cursor_on_node()"
+  end
+  if opts.update_cwd then
+    vim.cmd "au DirChanged * lua require'nvim-tree.lib'.change_dir(vim.loop.cwd())"
+  end
+  vim.cmd "augroup end"
+end
+
+local DEFAULT_OPTS = {
+  disable_netrw     = true,
+  hijack_netrw      = true,
+  on_enter          = false,
+  lsp_diagnostics   = false,
+  auto_close        = false,
+  tab_open          = false,
+  hijack_cursor     = false,
+  update_cwd        = false,
+}
+
+function M.setup(conf)
+  local opts = vim.tbl_deep_extend('force', DEFAULT_OPTS, conf or {})
+
+  view.setup()
+  colors.setup()
+  -- M.on_enter()
+  require'nvim-tree.lib'.setup(opts.on_enter)
+
+  manage_netrw(opts.disable_netrw, opts.hijack_netrw)
+  setup_autocommands(opts)
+  setup_vim_commands()
+end
 
 return M

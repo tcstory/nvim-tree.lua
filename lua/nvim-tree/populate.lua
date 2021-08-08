@@ -1,17 +1,10 @@
-local config = require'nvim-tree.config'
-local git = require'nvim-tree.git'
-local icon_config = config.get_icon_state()
-
 local api = vim.api
 local luv = vim.loop
 
-local M = {
-  show_ignored = false,
-  show_dotfiles = vim.g.nvim_tree_hide_dotfiles ~= 1,
-}
-
 local utils = require'nvim-tree.utils'
 local path_to_matching_str = utils.path_to_matching_str
+
+local M = {}
 
 local function dir_new(cwd, name)
   local absolute_path = utils.path_join({cwd, name})
@@ -116,48 +109,6 @@ local function node_comparator(a, b)
   return a.name:lower() <= b.name:lower()
 end
 
-local function gen_ignore_check(cwd)
-  if not cwd then cwd = luv.cwd() end
-  local ignore_list = {}
-
-  if vim.g.nvim_tree_ignore and #vim.g.nvim_tree_ignore > 0 then
-    for _, entry in pairs(vim.g.nvim_tree_ignore) do
-      ignore_list[entry] = true
-    end
-  end
-
-  ---Check if the given path should be ignored.
-  ---@param path string Absolute path
-  ---@return boolean
-  return function(path)
-    local basename = utils.path_basename(path)
-
-    if not M.show_ignored then
-      if vim.g.nvim_tree_gitignore == 1 then
-        if git.should_gitignore(path) then return true end
-      end
-
-      local relpath = utils.path_relative(path, cwd)
-      if ignore_list[relpath] == true or ignore_list[basename] == true then
-        return true
-      end
-
-      local idx = path:match(".+()%.%w+$")
-      if idx then
-        if ignore_list['*'..string.sub(path, idx)] == true then return true end
-      end
-    end
-
-    if not M.show_dotfiles then
-      if basename:sub(1, 1) == '.' then return true end
-    end
-
-    return false
-  end
-end
-
-local should_ignore = gen_ignore_check()
-
 function M.refresh_entries(entries, cwd, parent_node)
   local handle = luv.fs_scandir(cwd)
   if type(handle) == 'string' then
@@ -186,22 +137,20 @@ function M.refresh_entries(entries, cwd, parent_node)
     num_new_entries = num_new_entries + 1
 
     local abs = utils.path_join({cwd, name})
-    if not should_ignore(abs) then
-      if not t then
-        local stat = luv.fs_stat(abs)
-        t = stat and stat.type
-      end
+    if not t then
+      local stat = luv.fs_stat(abs)
+      t = stat and stat.type
+    end
 
-      if t == 'directory' then
-        table.insert(dirs, name)
-        new_entries[name] = true
-      elseif t == 'file' then
-        table.insert(files, name)
-        new_entries[name] = true
-      elseif t == 'link' then
-        table.insert(links, name)
-        new_entries[name] = true
-      end
+    if t == 'directory' then
+      table.insert(dirs, name)
+      new_entries[name] = true
+    elseif t == 'file' then
+      table.insert(files, name)
+      new_entries[name] = true
+    elseif t == 'link' then
+      table.insert(links, name)
+      new_entries[name] = true
     end
   end
 
@@ -297,19 +246,17 @@ function M.populate(entries, cwd, parent_node)
     if not name then break end
 
     local abs = utils.path_join({cwd, name})
-    if not should_ignore(abs) then
-      if not t then
-        local stat = luv.fs_stat(abs)
-        t = stat and stat.type
-      end
+    if not t then
+      local stat = luv.fs_stat(abs)
+      t = stat and stat.type
+    end
 
-      if t == 'directory' then
-        table.insert(dirs, name)
-      elseif t == 'file' then
-        table.insert(files, name)
-      elseif t == 'link' then
-        table.insert(links, name)
-      end
+    if t == 'directory' then
+      table.insert(dirs, name)
+    elseif t == 'file' then
+      table.insert(files, name)
+    elseif t == 'link' then
+      table.insert(links, name)
     end
   end
 
@@ -323,7 +270,6 @@ function M.populate(entries, cwd, parent_node)
       if links[1] then child_node = link_new(cwd, links[1]) end
       if luv.fs_access(child_node.absolute_path, 'R') then
         parent_node.group_next = child_node
-        child_node.git_status = parent_node.git_status
         M.populate(entries, child_node.absolute_path, child_node)
         return
       end
@@ -350,14 +296,6 @@ function M.populate(entries, cwd, parent_node)
   end
 
   utils.merge_sort(entries, node_comparator)
-
-  if (not icon_config.show_git_icon) and vim.g.nvim_tree_git_hl ~= 1 then
-    return
-  end
-
-  if config.use_git() then
-    vim.schedule(function() git.update_status(entries, cwd, parent_node, true) end)
-  end
 end
 
 return M
